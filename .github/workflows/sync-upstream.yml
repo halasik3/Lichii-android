@@ -1,0 +1,114 @@
+name: sync-upstream
+
+# Keeps this fork's nx2 equal to upstream nx2, with the fork's own commits (android.yml and this
+# file) replayed on top. It runs daily at 03:17 UTC; android.yml builds at 04:17 UTC, so the APK
+# is always from the newest commits.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: zortos293/Lichii
+  BRANCH: nx2
+
+jobs:
+  sync:
+    name: Sync with upstream
+    # Never run in the upstream repo itself.
+    if: github.repository != 'zortos293/Lichii'
+    runs-on: ubuntu-24.04
+    steps:
+      # GITHUB_TOKEN cannot push commits that change files under .github/workflows, and upstream
+      # does change them, so a personal access token is required.
+      - name: Check for SYNC_TOKEN
+        shell: bash
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "::error::Add a SYNC_TOKEN secret (contents + workflows write access to this repo)."
+            exit 1
+          fi
+          # Says which kind of token the secret holds, without printing it, so a wrong or old token
+          # is easy to spot in the log.
+          case "$SYNC_TOKEN" in
+            github_pat_*) echo "SYNC_TOKEN is a fine-grained token (needs Contents + Workflows: Read and write)" ;;
+            ghp_*)        echo "SYNC_TOKEN is a classic token (needs the repo and workflow scopes)" ;;
+            *)            echo "SYNC_TOKEN has an unrecognised format" ;;
+          esac
+          echo "SYNC_TOKEN length: ${#SYNC_TOKEN}"
+          headers=$(curl -sS -D - -o /tmp/user.json -H "Authorization: Bearer $SYNC_TOKEN" https://api.github.com/user || true)
+          echo "$headers" | grep -i '^HTTP/' | tail -n 1 || true
+          echo "$headers" | grep -i '^x-oauth-scopes:' || echo "x-oauth-scopes: (none listed; normal for fine-grained tokens)"
+          echo "Token belongs to: $(jq -r '.login // "unknown"' /tmp/user.json 2>/dev/null || echo unknown)"
+
+      - name: Check out fork
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.BRANCH }}
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN }}
+
+      - name: Rebase onto upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream "$BRANCH"
+
+          if git merge-base --is-ancestor "upstream/$BRANCH" HEAD; then
+            echo "Already up to date with ${UPSTREAM_REPO}@${BRANCH}"
+            exit 0
+          fi
+
+          echo "New upstream commits:"
+          git log --oneline -n 20 "HEAD..upstream/$BRANCH"
+
+          # release-binaries.yml belongs to upstream. If this fork ever edited it, take upstream's
+          # version instead of stopping (disable that workflow in the Actions tab rather than
+          # editing the file). Any other conflict still stops the sync and leaves the fork untouched.
+          if ! git rebase "upstream/$BRANCH"; then
+            for attempt in $(seq 1 30); do
+              [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ] || break
+              bad=0
+              for f in $(git diff --name-only --diff-filter=U); do
+                case "$f" in
+                  .github/workflows/release-binaries.yml)
+                    # While rebasing, "ours" is the branch being rebased onto, which is upstream.
+                    if git checkout --ours -- "$f" 2> /dev/null; then git add "$f"; else git rm -q -- "$f"; fi
+                    echo "Took upstream's version of $f" ;;
+                  *)
+                    echo "::error::Conflict in $f: this fork and upstream both changed it."
+                    bad=1 ;;
+                esac
+              done
+              if [ "$bad" = 1 ]; then
+                git rebase --abort
+                exit 1
+              fi
+              if git diff --cached --quiet; then
+                git rebase --skip || true
+              else
+                GIT_EDITOR=true git rebase --continue || true
+              fi
+            done
+            if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
+              git rebase --abort
+              echo "::error::Rebase did not finish."
+              exit 1
+            fi
+          fi
+
+          git push --force-with-lease origin "HEAD:$BRANCH"
+          echo "Pushed $(git rev-parse --short HEAD)"
