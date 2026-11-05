@@ -100,7 +100,7 @@ jobs:
         with:
           fetch-depth: 0 # build.gradle.kts derives versionName from `git describe`
  
-      # Eglantine's Android app only lists container files (.nsp, .xci, ...), so Switch 2 games kept as
+      # Lichii's Android app only lists container files (.nsp, .xci, ...), so Switch 2 games kept as
       # loose folders (exefs/main) never show up. loose-exefs.patch adds a "Launch ExeFS game folder"
       # menu and lists loose games from your game folders. It is applied here at build time and never
       # committed, so syncing with upstream cannot conflict with it. If upstream later changes the same
@@ -185,7 +185,7 @@ jobs:
           cd artifacts
           ls -la
           for apk in *.apk; do
-            mv "$apk" "eglantine-android-arm64-v8a-${FLAVOR}-${BUILD_TYPE}-${GITHUB_SHA::7}.apk"
+            mv "$apk" "lichii-android-arm64-v8a-${FLAVOR}-${BUILD_TYPE}-${GITHUB_SHA::7}.apk"
           done
           ls -la
  
@@ -222,7 +222,7 @@ jobs:
       - name: Download APK
         uses: actions/download-artifact@v8
         with:
-          pattern: eglantine-android-arm64-v8a-${{ inputs.flavor }}-${{ inputs.build_type }}-*
+          pattern: lichii-android-arm64-v8a-${{ inputs.flavor }}-${{ inputs.build_type }}-*
           path: apk
           merge-multiple: true
  
@@ -237,6 +237,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --prerelease \
-            --title "Eglantine Android build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7})" \
+            --title "Lichii Android build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7})" \
             --notes "Android arm64-v8a build of \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA}. Flavor: ${{ inputs.flavor }}, type: ${{ inputs.build_type }}. No keys, firmware or games included."
  
