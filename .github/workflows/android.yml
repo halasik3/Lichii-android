@@ -112,6 +112,23 @@ jobs:
             exit 1
           }
  
+      # NDK 29's libc++ (needed for std::atomic_ref, which this fork uses) no longer pulls <vector> in
+      # indirectly, and android_common.h uses std::vector without including it. Add the include at
+      # build time instead of editing the file in the repo, so syncing with upstream stays clean.
+      # Skipped automatically once the header includes <vector> itself.
+      - name: Add missing includes for NDK 29
+        shell: bash
+        run: |
+          set -euo pipefail
+          f=src/common/android/android_common.h
+          if grep -q '#include <vector>' "$f"; then
+            echo "$f already includes <vector>"
+          else
+            sed -i '0,/#include <string>/s//#include <string>\n#include <vector>/' "$f"
+            grep -q '#include <vector>' "$f" || { echo "::error::Could not add #include <vector> to $f"; exit 1; }
+            echo "Added #include <vector> to $f"
+          fi
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
