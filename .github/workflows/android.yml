@@ -38,11 +38,8 @@ concurrency:
 env:
   FLAVOR: ${{ inputs.flavor || 'standard' }}
   BUILD_TYPE: ${{ inputs.build_type || 'Release' }}
-  # These must match src/android/app/build.gradle.kts (ndkVersion, externalNativeBuild.cmake.version,
-  # compileSdkVersion). If the build fails with "NDK/CMake not found", update them there and here.
-  NDK_VERSION: "29.0.14206865"
-  CMAKE_VERSION: "3.31.5"
-  ANDROID_PLATFORM: "android-36"
+  # NDK, CMake and the Android platform are read from src/android/app/build.gradle.kts by the
+  # "Read toolchain versions" step, so they cannot drift from what the build asks for.
   BUILD_TOOLS_VERSION: "36.0.0"
  
 jobs:
@@ -129,6 +126,27 @@ jobs:
             ccache ninja-build nasm autoconf automake libtool pkg-config \
             glslang-tools spirv-tools git
  
+      # Install exactly the NDK/CMake/platform the Gradle config asks for. Changing ndkVersion in
+      # build.gradle.kts is then the only place to touch.
+      - name: Read toolchain versions from Gradle config
+        shell: bash
+        run: |
+          set -euo pipefail
+          f=src/android/app/build.gradle.kts
+          ndk=$(grep -m1 -oP 'ndkVersion = "\K[^"]+' "$f" || true)
+          cmake=$(grep -m1 -oP '^\s*version = "\K3\.[0-9.]+(?=")' "$f" || true)
+          platform=$(grep -m1 -oP 'compileSdkVersion = "\K[^"]+' "$f" || true)
+          if [ -z "$ndk" ] || [ -z "$cmake" ] || [ -z "$platform" ]; then
+            echo "::error::Could not read ndkVersion / cmake version / compileSdkVersion from $f"
+            exit 1
+          fi
+          echo "NDK $ndk, CMake $cmake, platform $platform"
+          {
+            echo "NDK_VERSION=$ndk"
+            echo "CMAKE_VERSION=$cmake"
+            echo "ANDROID_PLATFORM=$platform"
+          } >> "$GITHUB_ENV"
+
       - name: Install Android SDK components
         shell: bash
         run: |
